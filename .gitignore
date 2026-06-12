@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Local agent state (memory, context, logs)
+.exempclaw/
+data/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
