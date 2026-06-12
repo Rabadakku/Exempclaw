@@ -1,20 +1,25 @@
 #!/usr/bin/env node
-import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { stdout } from "node:process";
 import { Command } from "commander";
-import { loadConfig, ActionPolicy, type RuntimeConfig } from "./config/index.js";
+import { loadConfig, loadOfflineConfig, ActionPolicy, type RuntimeConfig } from "./config/index.js";
 import { createLogger } from "./core/logger.js";
 import { ExempclawError } from "./core/errors.js";
 import { estimateCostUsd } from "./core/usage.js";
 import { loadAgentConfig } from "./agent/config.js";
-import type { RunHooks } from "./agent/agent.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { FileMemoryStore } from "./memory/file-store.js";
 import { ClaudeClient } from "./llm/claude.js";
 import { ingestArchive } from "./ingest/ingest.js";
+import { startDashboard } from "./dashboard/server.js";
+import type { AgentMeta } from "./dashboard/data.js";
 import { createTerminalApprover } from "./cli/approve.js";
 import { bold, cyan, dim, usageLine } from "./cli/render.js";
+import { Stage, flashLine, progressBar } from "./cli/tui.js";
+import { liveRunHooks } from "./cli/live.js";
+import { runChatSession } from "./cli/chat.js";
 import { runInit, type InitFlags } from "./cli/init.js";
+import { runDemo } from "./cli/demo.js";
+import { bootstrapDemo } from "./demo/bootstrap.js";
 import { runConnectors, runCosts, runDoctor, runHistory, runMemory } from "./cli/offline.js";
 
 const program = new Command();
@@ -22,7 +27,7 @@ const program = new Command();
 program
   .name("exempclaw")
   .description("Run Claude-powered agents that take over a departed employee's role.")
-  .version("0.2.0");
+  .version("0.3.0");
 
 program
   .command("init")
@@ -48,54 +53,51 @@ program
   .argument("<agentConfig>", "path to an agent config JSON file")
   .argument("<input>", "the message / instruction to give the agent")
   .option("--policy <policy>", "override outward-action policy: ask | auto | deny")
-  .option("--json", "print the full run result as JSON")
+  .option("--json", "print the full run result as JSON (disables animations)")
   .action(async (agentConfigPath: string, input: string, opts: { policy?: string; json?: boolean }) => {
-    const { orchestrator, agentId } = await bootstrapSingleAgent(agentConfigPath, opts.policy);
+    const stage = new Stage({ tty: opts.json ? false : undefined });
+    const animate = !opts.json && stage.isAnimated;
+    const { orchestrator, agentId, name } = await bootstrapSingleAgent(agentConfigPath, opts.policy, stage);
+
+    const running = new AbortController();
+    const onSigint = () => running.abort();
+    process.on("SIGINT", onSigint);
     try {
-      const result = await orchestrator.dispatch(agentId, input, { trigger: { kind: "cli", detail: "run" } });
+      const live = animate ? liveRunHooks(stage, name) : undefined;
+      const result = await orchestrator.dispatch(agentId, input, {
+        trigger: { kind: "cli", detail: "run" },
+        ...(live ? { hooks: live.hooks } : {}),
+        signal: running.signal,
+      });
+      live?.finish({ interrupted: result.stopReason === "interrupted" });
       if (opts.json) {
         stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else if (animate) {
+        // text already streamed above the live region
+        stdout.write(`\n${usageLine(result.usage, result.costUsd, result.iterations)}\n`);
       } else {
         stdout.write(`\n${result.text}\n`);
         stdout.write(`${usageLine(result.usage, result.costUsd, result.iterations)}\n`);
       }
+      if (result.stopReason === "interrupted") process.exitCode = 130;
     } finally {
+      process.removeListener("SIGINT", onSigint);
+      stage.stopAll();
       await orchestrator.shutdown();
     }
   });
 
 program
   .command("chat")
-  .description("Open an interactive REPL with a single agent (streams live).")
+  .description("Open an interactive REPL with a single agent (streams live, animated).")
   .argument("<agentConfig>", "path to an agent config JSON file")
   .option("--policy <policy>", "override outward-action policy: ask | auto | deny")
   .action(async (agentConfigPath: string, opts: { policy?: string }) => {
-    const { orchestrator, agentId, name } = await bootstrapSingleAgent(agentConfigPath, opts.policy);
-    stdout.write(`Chatting with ${bold(name)} ${dim(`(agent: ${agentId})`)}. Type "exit" to quit.\n`);
-
-    const hooks: RunHooks = {
-      onText: (delta) => stdout.write(delta),
-      onToolStart: (tool, input) =>
-        stdout.write(`\n${dim(`⚙ ${tool} ${truncateLine(JSON.stringify(input), 140)}`)}\n`),
-      onToolEnd: (tool, okFlag, detail) =>
-        okFlag ? undefined : stdout.write(`${dim(`↳ ${tool} failed${detail ? `: ${detail}` : ""}`)}\n`),
-    };
-
-    const rl = createInterface({ input: stdin, output: stdout });
+    const stage = new Stage();
+    const { orchestrator, agentId, name, model } = await bootstrapSingleAgent(agentConfigPath, opts.policy, stage);
     try {
-      for (;;) {
-        const line = (await rl.question(`\n${cyan("you ›")} `)).trim();
-        if (line === "exit" || line === "quit") break;
-        if (!line) continue;
-        stdout.write(`\n${bold(`${name} ›`)} `);
-        const result = await orchestrator.dispatch(agentId, line, {
-          hooks,
-          trigger: { kind: "chat" },
-        });
-        stdout.write(`\n${usageLine(result.usage, result.costUsd, result.iterations)}\n`);
-      }
+      await runChatSession({ orchestrator, agentId, name, model, stage });
     } finally {
-      rl.close();
       await orchestrator.shutdown();
     }
   });
@@ -113,6 +115,13 @@ program
       const cfg = await loadAgentConfig(path);
       await orchestrator.addAgent(cfg);
     }
+    // One-shot flash per inbound event; serialized so bursts don't interleave.
+    let flashQueue: Promise<void> = Promise.resolve();
+    orchestrator.onInboundEvent = (agentId, event) => {
+      flashQueue = flashQueue.then(() =>
+        flashLine(`${event.type} ${dim(`(${event.threadId})`)} → ${bold(agentId)}`),
+      );
+    };
     const stop = () => {
       void orchestrator.shutdown().then(() => process.exit(0));
     };
@@ -137,7 +146,9 @@ program
     const claude = new ClaudeClient(config.anthropicApiKey, config.defaultModel, log);
     const model = opts.model ?? agentCfg.model ?? config.defaultModel;
 
-    stdout.write(`Ingesting ${dir} for agent ${bold(agentCfg.id)} (model ${model})…\n`);
+    const stage = new Stage();
+    stage.print(`Ingesting ${dir} for agent ${bold(agentCfg.id)} ${dim(`(model ${model})`)}\n`);
+    stage.addRow("scan", { anim: "searching", icon: "◇", label: "scanning archive" });
     const result = await ingestArchive({
       dir,
       persona: agentCfg.persona,
@@ -147,8 +158,32 @@ program
       log,
       maxChunks: Number(opts.maxChunks),
       briefing: opts.briefing,
-      onProgress: (note) => stdout.write(`${dim(`· ${note}`)}\n`),
+      onProgress: (event) => {
+        switch (event.phase) {
+          case "scanned":
+            stage.settleRow("scan", {
+              label: "scanned archive",
+              suffix: dim(`${event.files} file(s)${event.skipped ? `, ${event.skipped} skipped` : ""}`),
+            });
+            break;
+          case "chunk":
+            stage.addRow("distill", {
+              anim: "reading",
+              icon: "▥",
+              label: `distilling ${event.files[0] ?? ""}${event.files.length > 1 ? ` +${event.files.length - 1}` : ""}`,
+              hint: `${progressBar(event.index - 1, event.total)} ${event.index}/${event.total}`,
+            });
+            break;
+          case "briefing":
+            stage.settleRow("distill", { label: "distilled archive" });
+            stage.addRow("brief", { anim: "writing", icon: "✎", label: "synthesizing role briefing" });
+            break;
+        }
+      },
     });
+    stage.settleRow("distill", { label: "distilled archive" });
+    stage.settleRow("brief", { label: "role briefing ready" });
+    stage.stopAll();
 
     stdout.write(`\nIngested ${result.files} file(s) in ${result.chunks} chunk(s) → ${bold(String(result.memoriesAdded))} memories.\n`);
     if (result.skippedFiles.length > 0) {
@@ -192,30 +227,124 @@ program
   .action(runConnectors);
 
 program
-  .command("doctor")
-  .description("Check the environment: Node version, API key, connector credentials.")
-  .action(runDoctor);
+  .command("dashboard")
+  .description("Serve the local read-only fleet dashboard (runs, approvals, costs, memory).")
+  .argument("[agentConfigs...]", "agent config JSONs to enrich the view with persona details")
+  .option("--port <n>", "port to listen on (127.0.0.1 only)", "4177")
+  .action(async (paths: string[], opts: { port: string }) => {
+    const config = loadOfflineConfig();
+    const log = createLogger(config.logLevel);
+    const metas = new Map<string, AgentMeta>();
+    for (const path of paths) {
+      const cfg = await loadAgentConfig(path);
+      metas.set(cfg.id, {
+        persona: cfg.persona,
+        model: cfg.model ?? config.defaultModel,
+        connectors: cfg.connectors,
+      });
+    }
+    const { url } = await startDashboard({ dataDir: config.dataDir, port: Number(opts.port), metas, log });
+    stdout.write(`${bold("Succession Ledger")} serving at ${cyan(url)}\n`);
+    stdout.write(dim(`data dir: ${config.dataDir} · ${metas.size} dossier(s) enriched · Ctrl-C to stop\n`));
+    await new Promise(() => undefined); // run until killed
+  });
 
-async function bootstrapSingleAgent(agentConfigPath: string, policyOverride?: string) {
+program
+  .command("doctor")
+  .description("Check the environment: Node, API key, and live connector probes.")
+  .option("--no-probe", "skip live connectivity probes (credential presence only)")
+  .action((opts: { probe: boolean }) => runDoctor({ probe: opts.probe }));
+
+const demo = program
+  .command("demo")
+  .description("Try Exempclaw with no API key: an animated tour, or a fully interactive offline demo.")
+  .action(runDemo); // bare `exempclaw demo` plays the animated tour
+
+demo
+  .command("chat")
+  .description("Interactive offline demo: a scripted brain + fictional Initech workspace, real runtime.")
+  .option("--policy <policy>", "outward-action policy for the demo: ask | auto | deny (default ask)")
+  .action(async (opts: { policy?: string }) => {
+    const stage = new Stage();
+    const policy = opts.policy ? parsePolicy(opts.policy) : undefined;
+    const { orchestrator, agentId, name, model } = await bootstrapDemo({
+      policy,
+      approve: createTerminalApprover(stage),
+    });
+    try {
+      await runChatSession({
+        orchestrator,
+        agentId,
+        name,
+        model,
+        stage,
+        notice:
+          "offline demo — scripted brain, fictional Initech inbox, $0.00 spend; the approval prompts and memory are the real thing",
+      });
+    } finally {
+      await orchestrator.shutdown();
+    }
+  });
+
+demo
+  .command("run <input>")
+  .description("One-shot offline demo run (try: \"Anything from Initech overnight?\").")
+  .option("--policy <policy>", "outward-action policy: ask | auto | deny (default ask)")
+  .option("--json", "print the full run result as JSON (disables animations)")
+  .action(async (input: string, opts: { policy?: string; json?: boolean }) => {
+    const stage = new Stage({ tty: opts.json ? false : undefined });
+    const animate = !opts.json && stage.isAnimated;
+    const policy = opts.policy ? parsePolicy(opts.policy) : undefined;
+    const { orchestrator, agentId, name } = await bootstrapDemo({
+      policy,
+      approve: createTerminalApprover(stage),
+    });
+    try {
+      const live = animate ? liveRunHooks(stage, name) : undefined;
+      const result = await orchestrator.dispatch(agentId, input, {
+        trigger: { kind: "cli", detail: "demo run" },
+        ...(live ? { hooks: live.hooks } : {}),
+      });
+      live?.finish();
+      if (opts.json) {
+        stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else if (animate) {
+        stdout.write(`\n${usageLine(result.usage, result.costUsd, result.iterations)}\n`);
+      } else {
+        stdout.write(`\n${result.text}\n`);
+        stdout.write(`${usageLine(result.usage, result.costUsd, result.iterations)}\n`);
+      }
+    } finally {
+      stage.stopAll();
+      await orchestrator.shutdown();
+    }
+  });
+
+async function bootstrapSingleAgent(agentConfigPath: string, policyOverride?: string, stage?: Stage) {
   const config = applyPolicyOverride(loadConfig(), policyOverride);
   const log = createLogger(config.logLevel);
-  const orchestrator = new Orchestrator(config, log, createTerminalApprover());
+  const orchestrator = new Orchestrator(config, log, createTerminalApprover(stage));
   const cfg = await loadAgentConfig(agentConfigPath);
   await orchestrator.addAgent(cfg);
-  return { orchestrator, agentId: cfg.id, name: cfg.persona.name };
+  return {
+    orchestrator,
+    agentId: cfg.id,
+    name: cfg.persona.name,
+    model: cfg.model ?? config.defaultModel,
+  };
 }
 
-function applyPolicyOverride(config: RuntimeConfig, policy?: string): RuntimeConfig {
-  if (!policy) return config;
+function parsePolicy(policy: string): ActionPolicy {
   const parsed = ActionPolicy.safeParse(policy);
   if (!parsed.success) {
     throw new ExempclawError(`invalid --policy "${policy}" (use ask, auto, or deny)`);
   }
-  return { ...config, actionPolicy: parsed.data };
+  return parsed.data;
 }
 
-function truncateLine(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+function applyPolicyOverride(config: RuntimeConfig, policy?: string): RuntimeConfig {
+  if (!policy) return config;
+  return { ...config, actionPolicy: parsePolicy(policy) };
 }
 
 program.parseAsync().catch((err: unknown) => {

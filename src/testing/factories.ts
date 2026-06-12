@@ -58,7 +58,8 @@ export function scriptedClaude(script: Anthropic.Message[], summary = "SUMMARY")
     calls,
     summarizeCalls,
     async turn(params: ClaudeTurnParams): Promise<Anthropic.Message> {
-      calls.push(params);
+      // Snapshot the messages array — the agent keeps mutating it after the call.
+      calls.push({ ...params, messages: [...params.messages] });
       const index = Math.min(calls.length - 1, script.length - 1);
       const message = script[index];
       if (!message) throw new Error("scriptedClaude: empty script");

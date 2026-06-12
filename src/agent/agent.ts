@@ -10,6 +10,7 @@ import { compactHistory } from "../memory/compaction.js";
 import {
   evaluatePolicy,
   resolvePolicy,
+  type AgentActivity,
   type ApprovalRequest,
   type Tool,
   type ToolContext,
@@ -45,9 +46,13 @@ export interface AgentDeps {
 
 /** Live-progress callbacks for terminal UX. All optional. */
 export interface RunHooks {
+  /** A model turn is starting (1-based). Show a thinking indicator. */
+  onTurnStart?: (iteration: number) => void;
   onText?: (delta: string) => void;
   onToolStart?: (name: string, input: unknown) => void;
   onToolEnd?: (name: string, ok: boolean, detail?: string) => void;
+  /** The agent called display_status — play the matching animation. */
+  onStatus?: (activity: AgentActivity, message: string) => void;
 }
 
 export interface RunOptions {
@@ -121,19 +126,34 @@ export class Agent {
 
     try {
       while (iterations < this.maxIterations) {
-        if (signal.aborted) break;
+        if (signal.aborted) {
+          stopReason = stopReason ?? "interrupted";
+          break;
+        }
         iterations++;
+        hooks.onTurnStart?.(iterations);
 
-        const message = await this.deps.claude.turn({
-          model: this.opts.model,
-          system,
-          messages,
-          tools,
-          effort: this.opts.effort,
-          signal,
-          onText: hooks.onText,
-          cacheConversation: true,
-        });
+        let message: Anthropic.Message;
+        try {
+          message = await this.deps.claude.turn({
+            model: this.opts.model,
+            system,
+            messages,
+            tools,
+            effort: this.opts.effort,
+            signal,
+            onText: hooks.onText,
+            cacheConversation: true,
+          });
+        } catch (err) {
+          if (signal.aborted) {
+            // Operator interrupt — settle gracefully, keep what we have.
+            stopReason = "interrupted";
+            iterations--;
+            break;
+          }
+          throw err;
+        }
         stopReason = message.stop_reason;
         usage = addUsage(usage, message.usage);
         lastContextTokens = contextTokens(message.usage);
@@ -253,6 +273,9 @@ export class Agent {
       signal,
       // Tools that need ad-hoc approval resolve against the global policy.
       requestApproval: (req) => evaluatePolicy(this.deps.actionPolicy, req, this.deps.approve),
+      emit: (event) => {
+        if (event.kind === "status") hooks.onStatus?.(event.activity, event.message);
+      },
     };
 
     const anyOutward = toolUses.some((call) => this.deps.tools.get(call.name)?.outward);

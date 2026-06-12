@@ -3,6 +3,26 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { Logger } from "../core/logger.js";
 import type { ActionPolicy } from "../config/index.js";
 
+/** Activities the agent can signal to the operator's terminal. */
+export const AGENT_ACTIVITIES = [
+  "thinking",
+  "searching",
+  "reading",
+  "writing",
+  "sending",
+  "waiting",
+  "celebrating",
+  "alert",
+] as const;
+export type AgentActivity = (typeof AGENT_ACTIVITIES)[number];
+
+/** A presentational signal from a tool to whatever UI is attached. */
+export interface AgentSignal {
+  kind: "status";
+  activity: AgentActivity;
+  message: string;
+}
+
 /**
  * Context handed to every tool at execution time. Tools never read global
  * state directly — everything they need comes through here, which keeps them
@@ -15,6 +35,8 @@ export interface ToolContext {
   requestApproval(action: ApprovalRequest): Promise<boolean>;
   /** Shared signal for cooperative cancellation. */
   signal: AbortSignal;
+  /** Present a signal to the attached UI (animated status line in the TUI). */
+  emit?(signal: AgentSignal): void;
 }
 
 export interface ApprovalRequest {

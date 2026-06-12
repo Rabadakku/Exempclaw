@@ -1,0 +1,20 @@
+From: Ana Flores <ana.flores@initech.example>
+To: support@acme.example
+Subject: Re: webhook retries dropping events
+Date: Mon, 02 Jun 2026 14:11:09 -0500
+
+Alex,
+
+Following up on the dropped webhook events. We're still seeing roughly one in
+two hundred deliveries vanish after the third retry. Your last note said a fix
+was headed to staging — any update on when it lands in production?
+
+Also: our finance team will start the renewal conversation in early September.
+It would help to have the volume pricing one-pager before then.
+
+Thanks,
+Ana
+
+> On May 29, Alex Rivera wrote:
+> We reproduced the retry drop and engineering has a fix in review. I'll
+> confirm the staging date by Friday.

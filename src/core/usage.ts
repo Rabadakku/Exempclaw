@@ -50,6 +50,7 @@ export function contextTokens(usage: Anthropic.Usage): number {
  * null cost — token counts are still tracked.
  */
 const MODEL_PRICES: Array<{ prefix: string; inputPerMTok: number; outputPerMTok: number }> = [
+  { prefix: "claude-demo", inputPerMTok: 0, outputPerMTok: 0 },
   { prefix: "claude-fable-5", inputPerMTok: 10, outputPerMTok: 50 },
   { prefix: "claude-mythos-5", inputPerMTok: 10, outputPerMTok: 50 },
   { prefix: "claude-opus-4", inputPerMTok: 5, outputPerMTok: 25 },

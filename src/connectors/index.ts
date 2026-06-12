@@ -3,6 +3,7 @@ import { EmailConnector } from "./email/email-connector.js";
 import { SlackConnector } from "./slack/slack-connector.js";
 import { NotionConnector } from "./notion/notion-connector.js";
 import { GitHubConnector } from "./github/github-connector.js";
+import { DemoConnector } from "../demo/demo-connector.js";
 
 export type { Connector, ConnectorContext, InboundEvent } from "./connector.js";
 export { renderEventInput } from "./connector.js";
@@ -58,6 +59,11 @@ const REGISTRY: Record<string, RegistryEntry> = {
       { field: "repos", env: "GITHUB_REPOS", required: false, note: "comma-separated owner/name list" },
       { field: "pollSeconds", env: "GITHUB_POLL_SECONDS", required: false, note: "default 60" },
     ],
+  },
+  demo: {
+    make: () => new DemoConnector(),
+    description: "Fictional email+Slack workspace for demo mode and sandboxing. No credentials.",
+    envKeys: [],
   },
 };
 

@@ -9,9 +9,11 @@ import { RunLog } from "../core/run-log.js";
 import { addTotals, emptyUsage, estimateCostUsd, formatUsd } from "../core/usage.js";
 import { FileMemoryStore } from "../memory/file-store.js";
 import { loadAgentConfig } from "../agent/config.js";
-import { connectorStatuses } from "../connectors/index.js";
+import { connectorStatuses, createConnector } from "../connectors/index.js";
 import { ClaudeClient } from "../llm/claude.js";
 import { bold, cyan, dim, fail, formatTokens, ok, table, warn } from "./render.js";
+import { Stage, toolIcon } from "./tui.js";
+import { PROBES } from "./probe.js";
 
 /**
  * CLI commands that work on local state only (no Anthropic key required,
@@ -178,43 +180,76 @@ export function runConnectors(): void {
   stdout.write(dim("\nA connector is usable when all its required vars are set.\n"));
 }
 
-export async function runDoctor(): Promise<void> {
-  const lines: string[] = [];
+export async function runDoctor(opts: { probe?: boolean } = {}): Promise<void> {
+  const probeEnabled = opts.probe ?? true;
+  const stage = new Stage();
   let failed = false;
 
   const major = Number(process.versions.node.split(".")[0]);
-  if (major >= 22) lines.push(ok(`node ${process.versions.node}`));
+  if (major >= 22) stage.print(`${ok(`node ${process.versions.node}`)}\n`);
   else {
-    lines.push(fail(`node ${process.versions.node} — Exempclaw needs >= 22 (built-in WebSocket)`));
+    stage.print(`${fail(`node ${process.versions.node} — Exempclaw needs >= 22 (built-in WebSocket)`)}\n`);
     failed = true;
   }
 
   const config = loadOfflineConfig();
-  lines.push(ok(`data dir: ${config.dataDir}`));
-  lines.push(ok(`default model: ${config.defaultModel} · action policy: ${config.actionPolicy}`));
+  stage.print(`${ok(`data dir: ${config.dataDir}`)}\n`);
+  stage.print(`${ok(`default model: ${config.defaultModel} · action policy: ${config.actionPolicy}`)}\n`);
+
+  // Anthropic API + connector probes run in parallel, each as a live row.
+  const checks: Promise<void>[] = [];
 
   if (!config.anthropicApiKey) {
-    lines.push(fail("ANTHROPIC_API_KEY is not set — agents cannot run (see .env.example)"));
+    stage.print(`${fail("ANTHROPIC_API_KEY is not set — agents cannot run (see .env.example)")}\n`);
     failed = true;
   } else {
-    const log = createLogger("error");
-    try {
-      const claude = new ClaudeClient(config.anthropicApiKey, config.defaultModel, log);
-      const model = await claude.ping();
-      lines.push(ok(`Anthropic API reachable — ${model.displayName} (${model.id})`));
-    } catch (err) {
-      lines.push(fail(`Anthropic API check failed: ${(err as Error).message}`));
-      failed = true;
-    }
+    stage.addRow("api", { anim: "thinking", icon: "◈", label: "Anthropic API" });
+    const claude = new ClaudeClient(config.anthropicApiKey, config.defaultModel, createLogger("error"));
+    checks.push(
+      claude.ping().then(
+        (model) => stage.settleRow("api", { suffix: dim(`${model.displayName} (${model.id})`) }),
+        (err) => {
+          failed = true;
+          stage.settleRow("api", { mark: "✗", color: "red", suffix: dim((err as Error).message) });
+        },
+      ),
+    );
   }
 
   for (const status of connectorStatuses()) {
-    const missing = status.envKeys.filter((k) => k.required && !k.set).map((k) => k.env);
-    if (status.configured) lines.push(ok(`connector ${status.id}: configured`));
-    else lines.push(warn(`connector ${status.id}: not configured (missing ${missing.join(", ")})`));
+    if (!status.configured) {
+      const missing = status.envKeys.filter((k) => k.required && !k.set).map((k) => k.env);
+      stage.print(`${warn(`connector ${status.id}: not configured (missing ${missing.join(", ")})`)}\n`);
+      continue;
+    }
+    if (!probeEnabled) {
+      stage.print(`${ok(`connector ${status.id}: credentials present (probe skipped)`)}\n`);
+      continue;
+    }
+    const prober = PROBES[status.id];
+    if (!prober) continue;
+    const rowId = `probe:${status.id}`;
+    stage.addRow(rowId, { anim: "searching", icon: toolIcon(`${status.id}_`), label: `probing ${status.id}` });
+    const { config: connectorConfig } = createConnector(status.id);
+    checks.push(
+      prober(connectorConfig).then((result) => {
+        if (result.ok) {
+          stage.settleRow(rowId, { label: `connector ${status.id}`, suffix: dim(result.detail) });
+        } else {
+          failed = true;
+          stage.settleRow(rowId, {
+            mark: "✗",
+            color: "red",
+            label: `connector ${status.id}`,
+            suffix: dim(result.detail),
+          });
+        }
+      }),
+    );
   }
 
-  stdout.write(`${lines.join("\n")}\n`);
+  await Promise.all(checks);
+  stage.stopAll();
   if (failed) process.exitCode = 1;
 }
 

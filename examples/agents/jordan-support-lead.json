@@ -11,5 +11,15 @@
   "model": "claude-opus-4-8",
   "effort": "high",
   "connectors": ["email", "slack"],
-  "maxIterations": 25
+  "maxIterations": 25,
+  "toolPolicies": {
+    "slack_post_message": "ask",
+    "email_send": "ask"
+  },
+  "schedules": [
+    {
+      "dailyAt": "09:00",
+      "input": "Morning triage: review unread email and recent Slack activity in the support channels. Summarize what needs attention today, handle anything routine, and flag anything that needs a human."
+    }
+  ]
 }

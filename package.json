@@ -1,6 +1,6 @@
 {
   "name": "exempclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A terminal-based framework for building and running many Claude-powered agents that take over a departed employee's role, building context from their past work and acting through their channels with a new persona.",
   "type": "module",
   "engines": {

@@ -1,6 +1,6 @@
 import type { RuntimeConfig } from "../config/index.js";
 import type { Logger } from "../core/logger.js";
-import { ClaudeClient } from "../llm/claude.js";
+import { ClaudeClient, type ClaudeLike } from "../llm/claude.js";
 import { RunLog } from "../core/run-log.js";
 import { Agent, type RunHooks, type RunResult } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
@@ -32,6 +32,8 @@ interface ManagedAgent {
 export interface DispatchOptions {
   hooks?: RunHooks;
   trigger?: { kind: TriggerKind; detail?: string };
+  /** Per-run cancellation (combined with the orchestrator's shutdown signal). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -45,22 +47,22 @@ export interface DispatchOptions {
  *  - serialize each agent's runs so a single agent never overlaps itself.
  */
 export class Orchestrator {
-  private readonly claude: ClaudeClient;
+  private readonly claude: ClaudeLike;
   private readonly managed = new Map<string, ManagedAgent>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly abort = new AbortController();
+
+  /** Optional observer for inbound events that pass dedup (CLI flash lines). */
+  onInboundEvent?: (agentId: string, event: InboundEvent) => void;
 
   constructor(
     private readonly config: RuntimeConfig,
     private readonly log: Logger,
     private readonly approve: (req: ApprovalRequest) => Promise<boolean>,
+    opts: { claude?: ClaudeLike } = {},
   ) {
-    this.claude = new ClaudeClient(config.anthropicApiKey, config.defaultModel, log);
-  }
-
-  /** The shared Claude client (used by the ingest command). */
-  get claudeClient(): ClaudeClient {
-    return this.claude;
+    // Demo mode injects a scripted brain; everything else is identical.
+    this.claude = opts.claude ?? new ClaudeClient(config.anthropicApiKey, config.defaultModel, log);
   }
 
   /** Builds an agent from its config and registers it (does not start listening). */
@@ -120,12 +122,13 @@ export class Orchestrator {
     const managed = this.managed.get(agentId);
     if (!managed) throw new Error(`no such agent: ${agentId}`);
 
+    const signal = options.signal ? AbortSignal.any([this.abort.signal, options.signal]) : this.abort.signal;
     const prior = this.queues.get(agentId) ?? Promise.resolve();
     const next = prior
       .catch(() => undefined) // a failed prior run must not poison the queue
       .then(() =>
         managed.agent.run(input, {
-          signal: this.abort.signal,
+          signal,
           hooks: options.hooks,
           trigger: options.trigger,
         }),
@@ -193,6 +196,7 @@ export class Orchestrator {
         return;
       }
       this.log.info("inbound event", { agentId, connector: event.connector, type: event.type });
+      this.onInboundEvent?.(agentId, event);
       await this.dispatch(agentId, renderEventInput(event), {
         trigger: { kind: "event", detail: `${event.type} ${event.threadId}` },
       });

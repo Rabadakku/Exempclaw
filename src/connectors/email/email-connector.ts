@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ImapFlow, type FetchMessageObject, type ImapFlowOptions } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
 import { createTransport, type Transporter } from "nodemailer";
-import { abortedPromise, type Connector, type ConnectorContext, type InboundEvent } from "../connector.js";
+import { abortedPromise, sleep, type Connector, type ConnectorContext, type InboundEvent } from "../connector.js";
 import { ConnectorError } from "../../core/errors.js";
 import { defineTool, type Tool } from "../../tools/tool.js";
 import type { Logger } from "../../core/logger.js";
@@ -208,6 +208,25 @@ export class EmailConnector implements Connector {
       },
     });
 
+    const markRead = defineTool({
+      name: "email_mark_read",
+      description:
+        "Mark a message as read (seen) by uid once you've handled it, so it stops showing up as unread in future triage passes.",
+      schema: z.object({ uid: z.number().int().min(1) }),
+      execute: async (input) => {
+        const client = await this.getToolsImap();
+        const lock = await client.getMailboxLock("INBOX");
+        try {
+          const ok = await client.messageFlagsAdd(String(input.uid), ["\\Seen"], { uid: true });
+          return ok
+            ? { content: `Marked uid ${input.uid} as read.` }
+            : { content: `Could not mark uid ${input.uid} as read.`, isError: true };
+        } finally {
+          lock.release();
+        }
+      },
+    });
+
     const sendEmail = defineTool({
       name: "email_send",
       description:
@@ -226,41 +245,60 @@ export class EmailConnector implements Connector {
       },
     });
 
-    return [listInbox, readMessage, searchMail, sendEmail];
+    return [listInbox, readMessage, searchMail, markRead, sendEmail];
   }
 
-  /** IDLEs on INBOX over a dedicated connection; new mail becomes events. */
+  /**
+   * IDLEs on INBOX over a dedicated connection; new mail becomes events.
+   * Reconnects with backoff when the server drops the connection (common —
+   * many IMAP servers cut idle sessions every few minutes).
+   */
   async listen(onEvent: (event: InboundEvent) => void, signal: AbortSignal): Promise<void> {
     if (!this.cfg.imapHost) {
       this.log.warn("EMAIL_IMAP_HOST not set — email inbound events disabled (send still works)");
       return;
     }
-    const client = await this.connectImap();
-    this.listenImap = client;
-    const mailbox = await client.mailboxOpen("INBOX");
-    let lastSeen = mailbox.exists;
-    this.log.info("email listening", { inbox: mailbox.exists });
+    let backoffMs = 2000;
+    while (!signal.aborted) {
+      try {
+        const client = await this.connectImap();
+        this.listenImap = client;
+        const closed = new Promise<void>((resolve) => client.on("close", () => resolve()));
+        const mailbox = await client.mailboxOpen("INBOX");
+        let lastSeen = mailbox.exists;
+        this.log.info("email listening", { inbox: mailbox.exists });
+        backoffMs = 2000; // healthy session — reset backoff
 
-    client.on("exists", (data) => {
-      void (async () => {
-        const from = lastSeen + 1;
-        lastSeen = data.count;
-        for (let seq = from; seq <= data.count; seq++) {
-          try {
-            const msg = await client.fetchOne(String(seq), { source: true, uid: true });
-            if (!msg || !msg.source) continue;
-            const parsed = await simpleParser(msg.source);
-            const event = parsedMailToInbound(msg.uid, parsed, this.cfg.user);
-            if (event) onEvent(event);
-          } catch (err) {
-            this.log.warn("failed to process incoming email", { seq, error: (err as Error).message });
-          }
-        }
-      })();
-    });
+        client.on("exists", (data) => {
+          void (async () => {
+            const from = lastSeen + 1;
+            lastSeen = data.count;
+            for (let seq = from; seq <= data.count; seq++) {
+              try {
+                const msg = await client.fetchOne(String(seq), { source: true, uid: true });
+                if (!msg || !msg.source) continue;
+                const parsed = await simpleParser(msg.source);
+                const event = parsedMailToInbound(msg.uid, parsed, this.cfg.user);
+                if (event) onEvent(event);
+              } catch (err) {
+                this.log.warn("failed to process incoming email", { seq, error: (err as Error).message });
+              }
+            }
+          })();
+        });
 
-    await abortedPromise(signal);
-    await client.logout().catch(() => undefined);
+        await Promise.race([abortedPromise(signal), closed]);
+        await client.logout().catch(() => undefined);
+        if (!signal.aborted) this.log.warn("imap connection closed; reconnecting");
+      } catch (err) {
+        if (signal.aborted) break;
+        this.log.warn("imap listener error; reconnecting", { error: (err as Error).message });
+      }
+      if (!signal.aborted) {
+        await sleep(backoffMs, signal);
+        backoffMs = Math.min(backoffMs * 2, 60_000);
+      }
+    }
   }
 
   async shutdown(): Promise<void> {

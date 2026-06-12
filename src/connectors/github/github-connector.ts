@@ -173,6 +173,42 @@ export class GitHubConnector implements Connector {
       },
     });
 
+    const updateIssue = defineTool({
+      name: "github_update_issue",
+      description: "Close or reopen an issue, and/or add labels to it. Acts outward; requires approval.",
+      outward: true,
+      schema: z
+        .object({
+          repo: z.string().optional(),
+          number: z.number().int().min(1),
+          state: z.enum(["open", "closed"]).optional(),
+          addLabels: z.array(z.string()).default([]),
+        })
+        .refine((v) => v.state !== undefined || v.addLabels.length > 0, {
+          message: "give a state and/or labels to add",
+        }),
+      execute: async (input, ctx) => {
+        const repo = this.resolveRepo(input.repo);
+        const did: string[] = [];
+        if (input.state) {
+          await this.api.patch(`/repos/${repo}/issues/${input.number}`, {
+            body: { state: input.state },
+            signal: ctx.signal,
+          });
+          did.push(input.state === "closed" ? "closed" : "reopened");
+        }
+        if (input.addLabels.length > 0) {
+          await this.api.post(`/repos/${repo}/issues/${input.number}/labels`, {
+            body: { labels: input.addLabels },
+            signal: ctx.signal,
+          });
+          did.push(`labeled [${input.addLabels.join(", ")}]`);
+        }
+        this.recordSelfAction(repo, input.number);
+        return { content: `${repo}#${input.number}: ${did.join(", ")}.` };
+      },
+    });
+
     const createIssue = defineTool({
       name: "github_create_issue",
       description: "Open a new issue. Acts outward; requires approval.",
@@ -194,7 +230,7 @@ export class GitHubConnector implements Connector {
       },
     });
 
-    return [listIssues, readIssue, comment, createIssue];
+    return [listIssues, readIssue, comment, updateIssue, createIssue];
   }
 
   /** Polls configured repos for updated issues and surfaces them as events. */

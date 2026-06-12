@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, extname } from "node:path";
 import { z } from "zod";
+import { simpleParser, type ParsedMail } from "mailparser";
 import type { ClaudeClient } from "../llm/claude.js";
 import type { Logger } from "../core/logger.js";
 import { addUsage, emptyUsage, type UsageTotals } from "../core/usage.js";
@@ -19,6 +20,7 @@ const TEXT_EXTENSIONS = new Set([
   ".md",
   ".markdown",
   ".eml",
+  ".mbox",
   ".json",
   ".csv",
   ".tsv",
@@ -29,6 +31,12 @@ const TEXT_EXTENSIONS = new Set([
   ".yaml",
   ".yml",
 ]);
+
+/** Structured progress events for the CLI's animated rendering. */
+export type IngestProgress =
+  | { phase: "scanned"; files: number; skipped: number }
+  | { phase: "chunk"; index: number; total: number; files: string[] }
+  | { phase: "briefing" };
 
 /** The slice of ClaudeClient ingestion needs (substitutable in tests). */
 export type IngestClaude = Pick<ClaudeClient, "extract" | "summarize">;
@@ -48,7 +56,7 @@ export interface IngestOptions {
   maxChunks?: number;
   /** Also synthesize a role briefing from the distilled memories. Default true. */
   briefing?: boolean;
-  onProgress?: (note: string) => void;
+  onProgress?: (event: IngestProgress) => void;
   signal?: AbortSignal;
 }
 
@@ -88,9 +96,10 @@ export async function ingestArchive(opts: IngestOptions): Promise<IngestResult> 
 
   const { files, skipped } = await collectFiles(opts.dir, maxFileBytes);
   if (files.length === 0) {
+    progress({ phase: "scanned", files: 0, skipped: skipped.length });
     return { files: 0, chunks: 0, memoriesAdded: 0, skippedFiles: skipped, usage: emptyUsage() };
   }
-  progress(`found ${files.length} readable file(s)${skipped.length ? `, skipped ${skipped.length}` : ""}`);
+  progress({ phase: "scanned", files: files.length, skipped: skipped.length });
 
   let chunks = chunkFiles(files, chunkChars);
   if (chunks.length > maxChunks) {
@@ -107,7 +116,7 @@ export async function ingestArchive(opts: IngestOptions): Promise<IngestResult> 
 
   for (const [index, chunk] of chunks.entries()) {
     if (opts.signal?.aborted) break;
-    progress(`distilling chunk ${index + 1}/${chunks.length} (${chunk.files.join(", ")})`);
+    progress({ phase: "chunk", index: index + 1, total: chunks.length, files: chunk.files });
     const { value, usage: turnUsage } = await opts.claude.extract({
       model: opts.model,
       schema: DistilledSchema,
@@ -130,7 +139,7 @@ export async function ingestArchive(opts: IngestOptions): Promise<IngestResult> 
 
   let briefing: string | undefined;
   if ((opts.briefing ?? true) && distilledTexts.length > 0 && !opts.signal?.aborted) {
-    progress("synthesizing role briefing");
+    progress({ phase: "briefing" });
     const summary = await opts.claude.summarize(distilledTexts.join("\n- "), {
       model: opts.model,
       instruction: briefingInstruction(opts.persona),
@@ -199,7 +208,7 @@ export async function collectFiles(
         continue;
       }
       const raw = await readFile(full, "utf8");
-      const text = normalizeText(raw, extname(entry.name).toLowerCase());
+      const text = await normalizeText(raw, extname(entry.name).toLowerCase());
       if (text.trim().length === 0) {
         skipped.push(`${rel} (empty)`);
         continue;
@@ -212,15 +221,67 @@ export async function collectFiles(
   return { files, skipped };
 }
 
-function normalizeText(raw: string, ext: string): string {
+async function normalizeText(raw: string, ext: string): Promise<string> {
   let text = raw;
   if (ext === ".html" || ext === ".htm") {
     text = text
       .replace(/<style[\s\S]*?<\/style>/gi, "")
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<[^>]+>/g, " ");
+  } else if (ext === ".eml") {
+    text = await parseEmlForIngest(raw);
+  } else if (ext === ".mbox") {
+    text = await parseMboxForIngest(raw);
   }
   return text.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/** Parses one RFC-822 message into clean header + body text for distillation. */
+async function parseEmlForIngest(raw: string): Promise<string> {
+  try {
+    const mail = await simpleParser(raw);
+    return renderMailForIngest(mail);
+  } catch {
+    return raw; // fall back to the raw source rather than dropping the file
+  }
+}
+
+/**
+ * Splits a classic mbox (messages separated by "From " lines) and parses each
+ * message. Caps the number of messages so a giant archive can't explode a
+ * single file into unbounded text.
+ */
+async function parseMboxForIngest(raw: string, maxMessages = 200): Promise<string> {
+  const parts = raw.split(/^From .*$/m).filter((p) => p.trim().length > 0);
+  if (parts.length === 0) return raw;
+  const rendered: string[] = [];
+  for (const part of parts.slice(0, maxMessages)) {
+    try {
+      const mail = await simpleParser(part.trim());
+      rendered.push(renderMailForIngest(mail));
+    } catch {
+      // skip unparseable fragments
+    }
+  }
+  if (parts.length > maxMessages) {
+    rendered.push(`[…${parts.length - maxMessages} more messages truncated…]`);
+  }
+  return rendered.join("\n\n----\n\n");
+}
+
+function renderMailForIngest(mail: ParsedMail): string {
+  const to = Array.isArray(mail.to) ? mail.to.map((t) => t.text).join(", ") : mail.to?.text;
+  const body = (mail.text ?? "").trim();
+  return [
+    `From: ${mail.from?.text ?? "?"}`,
+    to ? `To: ${to}` : "",
+    mail.date ? `Date: ${mail.date.toISOString()}` : "",
+    `Subject: ${mail.subject ?? "(no subject)"}`,
+    "",
+    body,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 /** Greedily packs files into chunks; oversized files split on paragraphs. */
