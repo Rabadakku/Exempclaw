@@ -23,11 +23,13 @@ export interface MemoryEntry {
 export interface MemoryStore {
   /** Durable knowledge / context. */
   addMemory(entry: Omit<MemoryEntry, "id" | "createdAt">): Promise<MemoryEntry>;
-  /** Naive retrieval for the foundation; replace with embeddings later. */
+  /** Keyword retrieval for the default store; replace with embeddings later. */
   searchMemory(query: string, limit?: number): Promise<MemoryEntry[]>;
   allMemories(): Promise<MemoryEntry[]>;
+  removeMemory(id: string): Promise<boolean>;
 
   /** Conversation/episodic history — the running message transcript. */
   loadHistory(): Promise<Anthropic.MessageParam[]>;
   saveHistory(messages: Anthropic.MessageParam[]): Promise<void>;
+  clearHistory(): Promise<void>;
 }

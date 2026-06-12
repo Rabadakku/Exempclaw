@@ -112,3 +112,16 @@ export async function evaluatePolicy(
       return interactiveApprover(request);
   }
 }
+
+/**
+ * Resolves the effective policy for one tool: an exact per-tool override wins,
+ * then a "*" override, then the deployment-wide default. Lets an agent config
+ * say e.g. auto-approve Slack thread replies while still gating email sends.
+ */
+export function resolvePolicy(
+  globalPolicy: ActionPolicy,
+  overrides: Record<string, ActionPolicy> | undefined,
+  toolName: string,
+): ActionPolicy {
+  return overrides?.[toolName] ?? overrides?.["*"] ?? globalPolicy;
+}

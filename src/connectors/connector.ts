@@ -24,8 +24,8 @@ export interface Connector {
 
   /**
    * Begin listening for inbound events, delivering each to `onEvent`. Optional —
-   * a write-only connector (e.g. a metrics sink) can omit it. Should resolve
-   * once listening has started and run until `signal` aborts.
+   * a write-only connector (e.g. a metrics sink) can omit it. Runs until
+   * `signal` aborts; the returned promise resolves when listening has stopped.
    */
   listen?(onEvent: (event: InboundEvent) => void, signal: AbortSignal): Promise<void>;
 
@@ -44,11 +44,46 @@ export interface InboundEvent {
   connector: string;
   /** e.g. "email.received", "slack.mention". */
   type: string;
-  /** Stable identifier of the conversation/thread, for routing + dedup. */
+  /**
+   * Unique id of this occurrence, used for at-least-once dedup across
+   * restarts. Use the upstream system's id (message id, event ts, …).
+   */
+  eventId: string;
+  /** Stable identifier of the conversation/thread, for routing + replies. */
   threadId: string;
   /** Human-readable summary used as the agent's user-turn input. */
   summary: string;
   /** Raw payload for tools that need full fidelity. */
   payload: unknown;
   receivedAt: string;
+}
+
+/** Renders an inbound event into the user-turn text fed to the agent. */
+export function renderEventInput(event: InboundEvent): string {
+  return [
+    `[inbound event] connector=${event.connector} type=${event.type} thread=${event.threadId} received=${event.receivedAt}`,
+    event.summary,
+    "",
+    "Handle this event in your role. Gather context with your tools first; reply in the originating thread if (and only if) a response is warranted.",
+  ].join("\n");
+}
+
+/** Waits until the signal aborts. Shared by polling/listening loops. */
+export function abortedPromise(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+}
+
+/** Abortable sleep that resolves early (without throwing) when aborted. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      signal?.removeEventListener("abort", done);
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
