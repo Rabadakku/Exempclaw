@@ -255,6 +255,41 @@ program
   .option("--no-probe", "skip live connectivity probes (credential presence only)")
   .action((opts: { probe: boolean }) => runDoctor({ probe: opts.probe }));
 
+const plugin = program.command("plugin").description("Manage plugins (~/.exempclaw/plugins).");
+
+plugin
+  .command("create <name>")
+  .description("Scaffold a new plugin folder with a working example tool.")
+  .action(async (name: string) => {
+    const { scaffoldPlugin } = await import("./plugins/scaffold.js");
+    const { defaultPluginsDir } = await import("./plugins/loader.js");
+    const dir = await scaffoldPlugin(defaultPluginsDir(), name);
+    stdout.write(`Created ${bold(dir)}\nEdit ${dir}/index.js, then run ${cyan("exempclaw")} → Plugins to see it loaded.\n`);
+  });
+
+plugin
+  .command("list")
+  .description("List discovered plugins and any load errors.")
+  .action(async () => {
+    const { loadPlugins, defaultPluginsDir } = await import("./plugins/loader.js");
+    const result = await loadPlugins();
+    stdout.write(dim(`plugins dir: ${defaultPluginsDir()}\n`));
+    if (result.plugins.length === 0 && result.failures.length === 0) {
+      stdout.write("No plugins installed. Try: exempclaw plugin create my-plugin\n");
+      return;
+    }
+    for (const p of result.plugins) {
+      const provides = [
+        p.spec.tools?.length ? `${p.spec.tools.length} tool(s)` : "",
+        p.spec.connectors?.length ? `${p.spec.connectors.length} connector(s)` : "",
+      ].filter(Boolean).join(", ");
+      stdout.write(`✓ ${bold(p.manifest.name)} ${p.manifest.version} ${dim(provides || "nothing exported")}\n`);
+    }
+    for (const f of result.failures) {
+      stdout.write(`✗ ${bold(f.name)} ${dim(f.error)}\n`);
+    }
+  });
+
 const demo = program
   .command("demo")
   .description("Try Exempclaw with no API key: an animated tour, or a fully interactive offline demo.")
