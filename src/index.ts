@@ -290,6 +290,14 @@ plugin
     }
   });
 
+program
+  .command("ui")
+  .description("Open the full-screen fleet UI (the same thing bare `exempclaw` does).")
+  .action(async () => {
+    const { startUi } = await import("./ui/start.js");
+    await startUi();
+  });
+
 const demo = program
   .command("demo")
   .description("Try Exempclaw with no API key: an animated tour, or a fully interactive offline demo.")
@@ -382,7 +390,23 @@ function applyPolicyOverride(config: RuntimeConfig, policy?: string): RuntimeCon
   return { ...config, actionPolicy: parsePolicy(policy) };
 }
 
-program.parseAsync().catch((err: unknown) => {
+async function main(): Promise<void> {
+  // Bare `exempclaw` opens the fleet UI — but only with a real interactive
+  // terminal. ink needs raw-mode stdin; without a TTY (pipes, CI) fall back to
+  // help text instead of crashing on setRawMode.
+  if (process.argv.slice(2).length === 0) {
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const { startUi } = await import("./ui/start.js");
+      await startUi();
+      return;
+    }
+    program.outputHelp();
+    return;
+  }
+  await program.parseAsync();
+}
+
+main().catch((err: unknown) => {
   if (err instanceof ExempclawError) {
     process.stderr.write(`\n✖ ${err.message}\n`);
   } else {
