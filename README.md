@@ -34,7 +34,7 @@ npx exempclaw
 
 # …or install it for keeps:
 npm install -g exempclaw          # then type:  exempclaw
-brew install santanajb03/tap/exempclaw   # (macOS, Homebrew)
+brew install Rabadakku/tap/exempclaw   # (macOS, Homebrew)
 ```
 
 That's it. Type **`exempclaw`** and you'll land in the menu above. From there:
@@ -115,7 +115,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 ### Installing from source
 
 ```bash
-git clone https://github.com/santanajb03/exempclaw.git
+git clone https://github.com/Rabadakku/Exempclaw.git
 cd exempclaw
 npm install
 npm run dev            # runs the TUI from source (tsx)

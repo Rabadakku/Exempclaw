@@ -1,11 +1,11 @@
 # packaging/homebrew/exempclaw.rb
-# Template for the santanajb03/homebrew-tap repo (Formula/exempclaw.rb).
+# Template for the Rabadakku/homebrew-tap repo (Formula/exempclaw.rb).
 # Replace url/sha256 at each release — see docs/RELEASING.md.
 require "language/node"
 
 class Exempclaw < Formula
   desc "Claude-powered agent fleet with a friendly terminal UI"
-  homepage "https://github.com/santanajb03/exempclaw"
+  homepage "https://github.com/Rabadakku/Exempclaw"
   url "https://registry.npmjs.org/exempclaw/-/exempclaw-0.4.0.tgz"
   sha256 "REPLACE_WITH_SHA256_OF_TARBALL"
   license "MIT"

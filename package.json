@@ -16,9 +16,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/santanajb03/exempclaw.git"
+    "url": "git+https://github.com/Rabadakku/Exempclaw.git"
   },
-  "homepage": "https://github.com/santanajb03/exempclaw#readme",
+  "homepage": "https://github.com/Rabadakku/Exempclaw#readme",
   "exports": {
     ".": "./dist/index.js",
     "./plugin": "./dist/plugins/define.js",

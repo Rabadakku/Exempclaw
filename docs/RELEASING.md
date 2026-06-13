@@ -10,7 +10,7 @@
 
 ## Update the Homebrew tap
 
-One-time setup: create a public GitHub repo `santanajb03/homebrew-tap` with a
+One-time setup: create a public GitHub repo `Rabadakku/homebrew-tap` with a
 `Formula/` folder.
 
 Each release:
@@ -24,11 +24,11 @@ Each release:
 3. Commit and push the tap repo.
 4. Verify:
    ```bash
-   brew install santanajb03/tap/exempclaw && exempclaw --version
+   brew install Rabadakku/tap/exempclaw && exempclaw --version
    ```
    (use `brew reinstall` / `brew upgrade` on subsequent releases.)
 
-Users then install with: `brew install santanajb03/tap/exempclaw`.
+Users then install with: `brew install Rabadakku/tap/exempclaw`.
 
 ## Notes
 
