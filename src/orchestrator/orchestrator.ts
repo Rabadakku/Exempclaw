@@ -6,7 +6,7 @@ import { Agent, type RunHooks, type RunResult } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { FileMemoryStore } from "../memory/file-store.js";
 import type { MemoryStore } from "../memory/store.js";
-import { ToolRegistry, type ApprovalRequest } from "../tools/tool.js";
+import { ToolRegistry, type ApprovalRequest, type Tool } from "../tools/tool.js";
 import { builtinTools } from "../tools/builtin.js";
 import {
   createConnector,
@@ -51,6 +51,7 @@ export class Orchestrator {
   private readonly managed = new Map<string, ManagedAgent>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly abort = new AbortController();
+  private readonly extraTools: Tool[];
 
   /** Optional observer for inbound events that pass dedup (CLI flash lines). */
   onInboundEvent?: (agentId: string, event: InboundEvent) => void;
@@ -59,10 +60,11 @@ export class Orchestrator {
     private readonly config: RuntimeConfig,
     private readonly log: Logger,
     private readonly approve: (req: ApprovalRequest) => Promise<boolean>,
-    opts: { claude?: ClaudeLike } = {},
+    opts: { claude?: ClaudeLike; extraTools?: Tool[] } = {},
   ) {
     // Demo mode injects a scripted brain; everything else is identical.
     this.claude = opts.claude ?? new ClaudeClient(config.anthropicApiKey, config.defaultModel, log);
+    this.extraTools = opts.extraTools ?? [];
   }
 
   /** Builds an agent from its config and registers it (does not start listening). */
@@ -77,6 +79,7 @@ export class Orchestrator {
 
     const tools = new ToolRegistry();
     for (const t of builtinTools(memory)) tools.register(t);
+    for (const t of this.extraTools) tools.register(t);
 
     const connectors: Connector[] = [];
     for (const connectorId of cfg.connectors) {

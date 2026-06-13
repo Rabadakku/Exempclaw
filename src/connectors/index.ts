@@ -71,6 +71,19 @@ export function availableConnectorIds(): string[] {
   return Object.keys(REGISTRY);
 }
 
+/** Registers a plugin-provided connector. Throws on id collision. */
+export function registerConnector(entry: {
+  id: string;
+  description: string;
+  envKeys: ConnectorEnvKey[];
+  make: () => Connector;
+}): void {
+  if (REGISTRY[entry.id]) {
+    throw new Error(`connector "${entry.id}" already registered`);
+  }
+  REGISTRY[entry.id] = { make: entry.make, envKeys: entry.envKeys, description: entry.description };
+}
+
 export interface ConnectorStatus {
   id: string;
   description: string;
