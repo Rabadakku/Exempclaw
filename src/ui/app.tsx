@@ -1,6 +1,6 @@
 // src/ui/app.tsx
 import React, { useEffect, useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import type { Services } from "./services.js";
 import type { RegisteredAgent, BrokenAgent } from "../agents/registry.js";
 import { HomeScreen } from "./screens/home.js";
@@ -9,6 +9,7 @@ import { AgentScreen } from "./screens/agent.js";
 import { CreateScreen } from "./screens/create.js";
 import { HistoryScreen } from "./screens/history.js";
 import { PluginsScreen } from "./screens/plugins.js";
+import { DoctorScreen } from "./screens/doctor.js";
 
 export type Route =
   | { name: "home" }
@@ -82,15 +83,8 @@ export function App({
         return <HistoryScreen services={services} onNavigate={setRoute} />;
       case "plugins":
         return <PluginsScreen services={services} onNavigate={setRoute} />;
-      // Later tasks replace these placeholders with real screens.
-      default:
-        return (
-          <Box flexDirection="column" paddingX={1}>
-            <Text>"{route.name}" screen is under construction.</Text>
-            <Text dimColor>esc to go home</Text>
-            <BackOnEscape onBack={() => setRoute({ name: "home" })} />
-          </Box>
-        );
+      case "doctor":
+        return <DoctorScreen onNavigate={setRoute} />;
     }
   })();
 
@@ -104,11 +98,4 @@ export function App({
       {screen}
     </ErrorBoundary>
   );
-}
-
-function BackOnEscape({ onBack }: { onBack: () => void }): null {
-  useInput((input, key) => {
-    if (key.escape || input === "q") onBack();
-  });
-  return null;
 }
