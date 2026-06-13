@@ -43,10 +43,10 @@ test("home menu renders and navigates", async () => {
   await new Promise((r) => setImmediate(r));
   stdin.write("\r"); // enter
   await new Promise((r) => setImmediate(r));
-  assert.match(lastFrame()!, /create/);
+  assert.match(lastFrame()!, /New agent/);
 });
 
 test("zero agents starts on the create wizard", () => {
   const { lastFrame } = render(<App services={stubServices()} initialAgents={[]} initialBroken={[]} />);
-  assert.match(lastFrame()!, /create/);
+  assert.match(lastFrame()!, /New agent/);
 });

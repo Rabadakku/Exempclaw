@@ -6,6 +6,7 @@ import type { RegisteredAgent, BrokenAgent } from "../agents/registry.js";
 import { HomeScreen } from "./screens/home.js";
 import { AgentsScreen } from "./screens/agents.js";
 import { AgentScreen } from "./screens/agent.js";
+import { CreateScreen } from "./screens/create.js";
 
 export type Route =
   | { name: "home" }
@@ -73,6 +74,8 @@ export function App({
         return <AgentsScreen services={services} onNavigate={setRoute} />;
       case "agent":
         return <AgentScreen services={services} agentId={route.id} onNavigate={setRoute} />;
+      case "create":
+        return <CreateScreen services={services} onNavigate={setRoute} />;
       // Later tasks replace these placeholders with real screens.
       default:
         return (
