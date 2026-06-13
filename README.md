@@ -1,5 +1,5 @@
 # Exempclaw
-
+*** ALPHA
 **Run helpful AI agents from your terminal — no coding required to get started.**
 
 Exempclaw lets you create a Claude-powered assistant that can cover a role:
