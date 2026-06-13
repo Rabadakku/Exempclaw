@@ -6,8 +6,8 @@ require "language/node"
 class Exempclaw < Formula
   desc "Claude-powered agent fleet with a friendly terminal UI"
   homepage "https://github.com/Rabadakku/Exempclaw"
-  url "https://registry.npmjs.org/exempclaw/-/exempclaw-0.4.0.tgz"
-  sha256 "REPLACE_WITH_SHA256_OF_TARBALL"
+  url "https://registry.npmjs.org/exempclaw/-/exempclaw-0.4.1.tgz"
+  sha256 "1cf5ae4b024917f238d8fd2ebace4dfc8828e38fcbf9b781e94dce10e6f8bac4"
   license "MIT"
 
   depends_on "node@22"
