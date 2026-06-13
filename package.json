@@ -1,13 +1,31 @@
 {
   "name": "exempclaw",
-  "version": "0.3.0",
-  "description": "A terminal-based framework for building and running many Claude-powered agents that take over a departed employee's role, building context from their past work and acting through their channels with a new persona.",
+  "version": "0.4.0",
+  "description": "A friendly terminal app for building and running Claude-powered agents that cover a role — with a menu-driven UI, a guided setup wizard, and an easy plugin system. Claude API only.",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "bin": {
     "exempclaw": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/santanajb03/exempclaw.git"
+  },
+  "homepage": "https://github.com/santanajb03/exempclaw#readme",
+  "exports": {
+    ".": "./dist/index.js",
+    "./plugin": "./dist/plugins/define.js",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -22,10 +40,11 @@
     "anthropic",
     "agents",
     "automation",
-    "cli"
+    "cli",
+    "tui",
+    "ink"
   ],
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
     "commander": "^14.0.1",
