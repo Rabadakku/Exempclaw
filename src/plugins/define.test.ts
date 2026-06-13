@@ -30,3 +30,28 @@ test("pluginApi exposes z, defineTool and definePlugin", () => {
   assert.equal(typeof pluginApi.definePlugin, "function");
   assert.equal(typeof pluginApi.z.object, "function");
 });
+
+test("definePlugin rejects a connector with no id", () => {
+  assert.throws(
+    () => definePlugin({ name: "p", connectors: [{ id: "", description: "d", envKeys: [], make: () => ({} as never) }] }),
+    /invalid connector/,
+  );
+});
+
+test("definePlugin rejects a connector with non-function make", () => {
+  assert.throws(
+    () => definePlugin({ name: "p", connectors: [{ id: "c1", description: "d", envKeys: [], make: "not-a-function" as never }] }),
+    /invalid connector/,
+  );
+});
+
+test("definePlugin rejects duplicate connector ids", () => {
+  const make = () => ({}) as never;
+  assert.throws(
+    () => definePlugin({ name: "p", connectors: [
+      { id: "c1", description: "d", envKeys: [], make },
+      { id: "c1", description: "d", envKeys: [], make },
+    ] }),
+    /duplicate connector/,
+  );
+});

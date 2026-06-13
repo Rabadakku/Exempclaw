@@ -32,12 +32,21 @@ export function definePlugin(spec: PluginSpec): PluginSpec {
     if (seen.has(tool.name)) throw new Error(`duplicate tool in plugin "${spec.name}": ${tool.name}`);
     seen.add(tool.name);
   }
+  const seenConnectors = new Set<string>();
   for (const connector of spec.connectors ?? []) {
     if (!connector.id || typeof connector.make !== "function") {
       throw new Error(`invalid connector in plugin "${spec.name}": needs id and make()`);
     }
+    if (seenConnectors.has(connector.id)) {
+      throw new Error(`duplicate connector id in plugin "${spec.name}": ${connector.id}`);
+    }
+    seenConnectors.add(connector.id);
   }
-  return spec;
+  return {
+    name: spec.name,
+    tools: spec.tools ? [...spec.tools] : undefined,
+    connectors: spec.connectors ? [...spec.connectors] : undefined,
+  };
 }
 
 export const pluginApi = { z, defineTool, definePlugin };
