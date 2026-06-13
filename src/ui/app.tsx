@@ -4,6 +4,7 @@ import { Box, Text, useInput } from "ink";
 import type { Services } from "./services.js";
 import type { RegisteredAgent, BrokenAgent } from "../agents/registry.js";
 import { HomeScreen } from "./screens/home.js";
+import { AgentsScreen } from "./screens/agents.js";
 
 export type Route =
   | { name: "home" }
@@ -67,6 +68,8 @@ export function App({
             onNavigate={setRoute}
           />
         );
+      case "agents":
+        return <AgentsScreen services={services} onNavigate={setRoute} />;
       // Later tasks replace these placeholders with real screens.
       default:
         return (
