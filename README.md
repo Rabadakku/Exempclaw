@@ -303,4 +303,4 @@ notice/disclosure requirements, is on the operator.
 
 ## License
 
-[MIT](LICENSE) © 2026 Joseph Santana
+[MIT](LICENSE) © 2026
