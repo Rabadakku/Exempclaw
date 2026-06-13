@@ -26,6 +26,14 @@ test("loads a factory-form plugin and isolates broken ones", async () => {
         })] });
       }`,
     });
+    await makePluginDir(root, "spec-form", {
+      "exempclaw.plugin.json": JSON.stringify({ name: "spec-form", version: "0.1.0", entry: "./index.mjs" }),
+      "index.mjs": `export default { name: "spec-form", tools: [] }`,
+    });
+    await makePluginDir(root, "async-form", {
+      "exempclaw.plugin.json": JSON.stringify({ name: "async-form", version: "0.1.0", entry: "./index.mjs" }),
+      "index.mjs": `export default async function ({ definePlugin }) { return definePlugin({ name: "async-form" }); }`,
+    });
     await makePluginDir(root, "no-manifest", { "index.mjs": "export default {}" });
     await makePluginDir(root, "bad-entry", {
       "exempclaw.plugin.json": JSON.stringify({ name: "bad-entry", version: "0.1.0", entry: "./index.mjs" }),
@@ -33,9 +41,11 @@ test("loads a factory-form plugin and isolates broken ones", async () => {
     });
 
     const result = await loadPlugins(root);
-    assert.equal(result.plugins.length, 1);
-    assert.equal(result.plugins[0]!.manifest.name, "good");
-    assert.equal(result.plugins[0]!.spec.tools?.[0]?.name, "good_hello");
+    assert.equal(result.plugins.length, 3);
+    const pluginNames = result.plugins.map((p) => p.manifest.name).sort();
+    assert.deepEqual(pluginNames, ["async-form", "good", "spec-form"]);
+    const good = result.plugins.find((p) => p.manifest.name === "good");
+    assert.equal(good!.spec.tools?.[0]?.name, "good_hello");
     assert.equal(result.failures.length, 2);
     const failedNames = result.failures.map((f) => f.name).sort();
     assert.deepEqual(failedNames, ["bad-entry", "no-manifest"]);

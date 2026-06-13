@@ -55,19 +55,23 @@ export async function loadPlugins(dir: string = defaultPluginsDir()): Promise<Pl
     } catch {
       continue;
     }
+    let manifest: PluginManifest | undefined;
     try {
       const manifestRaw = await readFile(join(pluginDir, "exempclaw.plugin.json"), "utf8");
-      const manifest = ManifestSchema.parse(JSON.parse(manifestRaw));
+      manifest = ManifestSchema.parse(JSON.parse(manifestRaw));
       const entryUrl = pathToFileURL(join(pluginDir, manifest.entry)).href;
       const mod = (await import(entryUrl)) as { default?: unknown };
       const exported = mod.default;
-      const spec = typeof exported === "function" ? (exported as (api: typeof pluginApi) => PluginSpec)(pluginApi) : exported;
+      const rawSpec = typeof exported === "function"
+        ? (exported as (api: typeof pluginApi) => PluginSpec | Promise<PluginSpec>)(pluginApi)
+        : exported;
+      const spec = rawSpec instanceof Promise ? await rawSpec : rawSpec;
       if (!spec || typeof spec !== "object" || typeof (spec as PluginSpec).name !== "string") {
         throw new Error("entry default export must be a PluginSpec or a factory returning one");
       }
       plugins.push({ manifest, dir: pluginDir, spec: spec as PluginSpec });
     } catch (err) {
-      failures.push({ dir: pluginDir, name: entry, error: (err as Error).message });
+      failures.push({ dir: pluginDir, name: manifest?.name ?? entry, error: err instanceof Error ? err.message : String(err) });
     }
   }
   return { plugins, failures };
