@@ -48,8 +48,8 @@ export function App({
   initialAgents: RegisteredAgent[];
   initialBroken: BrokenAgent[];
 }): React.JSX.Element {
-  // First run with zero agents goes straight into the create wizard.
-  const [route, setRoute] = useState<Route>(initialAgents.length === 0 ? { name: "create" } : { name: "home" });
+  // Always open on the home dashboard; the user chooses "New agent" when ready.
+  const [route, setRoute] = useState<Route>({ name: "home" });
   const [agents, setAgents] = useState(initialAgents);
   const [broken, setBroken] = useState(initialBroken);
 
@@ -65,14 +65,7 @@ export function App({
   const screen = (() => {
     switch (route.name) {
       case "home":
-        return (
-          <HomeScreen
-            agentCount={agents.length}
-            pluginCount={services.plugins.plugins.length}
-            pluginFailures={services.applied.failures.length}
-            onNavigate={setRoute}
-          />
-        );
+        return <HomeScreen services={services} agents={agents} onNavigate={setRoute} />;
       case "agents":
         return <AgentsScreen services={services} onNavigate={setRoute} />;
       case "agent":

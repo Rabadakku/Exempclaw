@@ -1,6 +1,6 @@
 {
   "name": "exempclaw",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A friendly terminal app for building and running Claude-powered agents that cover a role — with a menu-driven UI, a guided setup wizard, and an easy plugin system. Claude API only.",
   "type": "module",
   "engines": {

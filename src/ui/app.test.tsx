@@ -46,7 +46,8 @@ test("home menu renders and navigates", async () => {
   assert.match(lastFrame()!, /New agent/);
 });
 
-test("zero agents starts on the create wizard", () => {
+test("zero agents still opens on the home dashboard (not the wizard)", () => {
   const { lastFrame } = render(<App services={stubServices()} initialAgents={[]} initialBroken={[]} />);
-  assert.match(lastFrame()!, /New agent/);
+  assert.match(lastFrame()!, /E X E M P C L A W/);
+  assert.match(lastFrame()!, /0 configured/);
 });

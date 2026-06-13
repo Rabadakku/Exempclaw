@@ -27,7 +27,7 @@ const program = new Command();
 program
   .name("exempclaw")
   .description("Build and run Claude-powered agents from a friendly terminal menu. Run with no arguments to open it.")
-  .version("0.4.0");
+  .version("0.4.1");
 
 program
   .command("init")
